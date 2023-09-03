@@ -1,6 +1,6 @@
 import { useState } from "react";
 import server from "./server";
-import { utf8ToBytes } from "ethereum-cryptography/utils.js";
+import { utf8ToBytes, toHex } from "ethereum-cryptography/utils.js";
 import { secp256k1 } from "ethereum-cryptography/secp256k1.js";
 import { keccak256 } from "ethereum-cryptography/keccak";
 function Transfer({ address, setBalance, privateKey }) {
@@ -12,37 +12,28 @@ function Transfer({ address, setBalance, privateKey }) {
   async function transfer(evt) {
     evt.preventDefault();
     console.log(address);
-    let message = 'Send 10 to ';
-    message = message + recipient;
+    const message = {
+      sender: address,
+      amount: parseInt(sendAmount),
+      recipient,
+    };
     console.log("Message =", message);
-    const messageHash = keccak256(utf8ToBytes(message));
+    const messageBytes = utf8ToBytes(JSON.stringify(message));
+    const messageHash = keccak256(messageBytes);
+    console.log("message Hash", messageHash);
     const signature = secp256k1.sign(messageHash, privateKey, {recoverd: true});
-    console.log("Signature = ", signature);
-    console.log(secp256k1.verify(signature, messageHash, address));
-    const renderJson = (object) => {
-      return JSON.stringify(object, (key, value) => {
-          switch (typeof value) {
-              case 'bigint':
-                  return {  // warpper
-                      $T$: 'bigint',         // type   // maybe it is good to use some more complicated name instead of $T$
-                      $V$: value.toString()  // value  // maybe it is good to use some more complicated name instead of $V$
-                  };
-              // Put more cases here ...
-              default:
-                  return value;
-          }
-      });
-  };
-  const signatureString = renderJson(signature);
-
+    console.log(signature);
+    message.random = BigInt(signature.r).toString();
+    message.sign = BigInt(signature.s).toString();
+    message.recoveryBit = signature.recovery;
+    const recoveredKey = signature.recoverPublicKey(messageHash);
+    console.log("recovered key",toHex(recoveredKey.toRawBytes()));
+    // message.random = toHex(signature.r);
+    console.log('request0:', message);
     try {
       const {
         data: { balance },
-      } = await server.post(`send`, {
-        signature: signatureString,
-        amount: parseInt(sendAmount),
-        recipient
-      });
+      } = await server.post(`send`, message);
       setBalance(balance);
     } catch (ex) {
       console.log(ex);

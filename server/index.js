@@ -3,7 +3,8 @@ const app = express();
 const cors = require("cors");
 const port = 3042;
 const secp = require("ethereum-cryptography/secp256k1.js");
-
+const { keccak256 } = require("ethereum-cryptography/keccak");
+const { utf8ToBytes,toHex,hexToBytes } = require("ethereum-cryptography/utils");
 app.use(cors());
 app.use(express.json());
 
@@ -20,27 +21,28 @@ app.get("/balance/:address", (req, res) => {
 });
 
 app.post("/send", (req, res) => {
-  const { signature, recipient, amount } = req.body;
-  console.log(signature);
-  const pareseJson = (json) => {
-    return JSON.parse(json, (key, value) => {
-        if (typeof value === 'object') {
-            switch (value?.$T$) {
-                case 'bigint':  // warpper
-                    return BigInt(value.$V$);
-                // Put more cases here ...
-                default:
-                    return value;
-            }
-        } else {
-            return value;
-        }
-    });
-  };
-  const parsedSignature = pareseJson(signature); 
-  console.log("Parsed Signature:",parsedSignature);
-  const sender = new secp.secp256k1.Signature().recoverPublicKey(parsedSignature);
-  console.log(sender);
+  const { sender, recipient, amount, sign, recoveryBit, random} = req.body;
+  const message = {sender, amount,recipient};
+  const bytes = utf8ToBytes(JSON.stringify(message));
+  const messageHash = keccak256(bytes);
+  const signature = secp.secp256k1.Signature.prototype;
+  signature.s = BigInt(sign);
+  signature.r = BigInt(random);
+  signature.recovery = parseInt(recoveryBit);
+  // const signature = new secp.secp256k1.Signature( BigInt(random), BigInt(sign)).addRecoveryBit(recoveryBit);
+  const recovered = signature.recoverPublicKey(messageHash);
+  const addressOfSign = toHex((recovered.toRawBytes()));
+  console.log('addressOfSign:',addressOfSign);
+
+  if(sender!==addressOfSign){
+    res.status(401).send({ message: "Unauthorized" });
+  }else if (balances[sender] < amount) {
+    res.status(428).send({ message: "Not enough funds!" });
+  } else {
+    balances[sender] -= amount;
+    balances[recipient] += amount;
+    res.send({ balance: balances[sender] });
+  }
   setInitialBalance(sender);
   setInitialBalance(recipient);
 
@@ -61,6 +63,11 @@ function setInitialBalance(address) {
   if (!balances[address]) {
     balances[address] = 0;
   }
+}
+function addressFromPublicKey(publicKey){
+  const addrBytes = publicKey.slice(1);
+  const hash = keccak256(addrBytes);
+  return hash.slice(-20);
 }
 
 // Hex PrivateKey a4563bbc3641762ff3f8215be4d3393df7f35be10a52938c34d03fdeabad3ec9
